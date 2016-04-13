@@ -1,0 +1,21 @@
+Slicer
+-- A Valgrind tool by Anthony Carno
+
+Build/installation (from Valgrind docs):
+
+    1) cd <valgrind>
+    2) autogen.sh
+    3) ./configure --prefix=`pwd`/inst
+    4) make
+    5) make install
+
+Running:
+    <valgrind>/inst/bin/valgrind --tool=slicer <options> <program>
+
+Options:
+    --funcs=<FILENAME>      Only profile functions included in <FILENAME>
+                                (1 function/line) (HIGHLY RECOMMENDED)
+    --output=<FILENAME>     Output to <FILENAME> (in CSV format)
+
+
+    
