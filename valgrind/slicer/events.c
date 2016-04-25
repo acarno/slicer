@@ -73,6 +73,7 @@ typedef struct call_event_t {
     Call_Loc_Info   call_loc;       //Location of call
     ULong           max_instrs;     //Max # of instrs (calling --> call)
     ULong           min_instrs;     //Min # of instrs
+    ULong           avg_instrs;     //Average # of instrs
     ULong           total_instrs;   //Total # of instrs (for averaging)
     ULong           call_count;     //Total # of calls (for averaging)
 } Call_Event;
@@ -140,7 +141,8 @@ void sl_clean_up(void)
     VG_(free)(threads);
 }
 
-IRDirty *sl_update_call_event(ThreadId tid, const HChar *func, const HChar *file, UInt line)
+IRDirty *sl_update_call_event(ThreadId tid, const HChar *func, 
+                                const HChar *file, UInt line)
 {
     Bool          retval;
     Thread_Info  *ti;
@@ -191,18 +193,31 @@ void sl_incr_instr_count(ThreadId tid, HChar *file,
 
 void sl_dump_call_events(VgFile *dumpfile) {
     ThreadId tid;
+    Thread_Info *ti;
+    ULong i;
 
-    VG_(fprintf)(dumpfile, "%s,%s,%s,%s,%s\n",
+    //Close out any current call events
+    for (tid = 0; tid < VG_N_THREADS; ++tid)
+    {
+        ti = &threads[tid];
+        if (ti->cur_instr_count != 0)
+        {
+            sl_update_call_event(tid, "", "", 0);
+            update_existing_event(ti, ti->num_events-1);
+        }
+    }
+
+    VG_(fprintf)(dumpfile, "%s,%s,%s,%s,%s,%s\n",
             "tid",
             "calling_func,calling_file,calling_line",
             "called_func,called_filed,called_line",
             "call_file,call_loc",
-            "max_instrs,min_instrs,avg_instrs");
+            "max_instrs,min_instrs,avg_instrs",
+            "total_instrs,call_count");
 
     for (tid = 0; tid < VG_N_THREADS; ++tid)
     {
-        Thread_Info *ti = &threads[tid];
-        ULong i;
+        ti = &threads[tid];
         for (i = 0; i < ti->num_events; ++i)
         {
             VG_(memset)(buf, 0, 4096);
@@ -378,14 +393,20 @@ static void update_existing_event(Thread_Info *ti, ULong eventId)
         event->min_instrs = ti->cur_instr_count;
     
     event->total_instrs += ti->cur_instr_count;
+    ti->cur_instr_count = 0;
     event->call_count++;
+    event->avg_instrs = event->total_instrs/event->call_count;
 
-    //Reset thread's calling func information
-    VG_(strncpy)(ti->cur_calling.func, 
-            ti->cur_called.func, MAX_NAME_LENGTH);
-    VG_(strncpy)(ti->cur_calling.loc.file,
-            ti->cur_called.loc.file, MAX_NAME_LENGTH);
-    ti->cur_calling.loc.line = ti->cur_called.loc.line;
+    //Reset thread's calling func information IF it has changed
+    //  Note: assuming no recursion!!
+    if (!VG_STREQ(ti->cur_calling.func, ti->cur_called.func))
+    {
+        VG_(strncpy)(ti->cur_calling.func, 
+                ti->cur_called.func, MAX_NAME_LENGTH);
+        VG_(strncpy)(ti->cur_calling.loc.file,
+                ti->cur_called.loc.file, MAX_NAME_LENGTH);
+        ti->cur_calling.loc.line = ti->cur_called.loc.line;
+    }
 
 }
 
@@ -403,7 +424,8 @@ static Bool get_call_event_string(ThreadId tid, ULong id,
 
     event = ti->events[id];
     
-    VG_(snprintf)(strbuf, buf_len, "%ld,%s,%s,%d,%s,%s,%d,%s,%d,%ld,%ld,%ld",
+    VG_(snprintf)(strbuf, buf_len, 
+                    "%ld,%s,%s,%d,%s,%s,%d,%s,%d,%ld,%ld,%ld,%ld,%ld",
                         (unsigned long) tid,
                         event->calling_func.func,
                         event->calling_func.loc.file,
@@ -415,7 +437,9 @@ static Bool get_call_event_string(ThreadId tid, ULong id,
                         (unsigned) event->call_loc.line,
                         (unsigned long) event->max_instrs,
                         (unsigned long) event->min_instrs,
-                        (unsigned long) (event->total_instrs/event->call_count)
+                        (unsigned long) event->avg_instrs,
+                        (unsigned long) event->total_instrs,
+                        (unsigned long) event->call_count
                 );
     return True;
 }
